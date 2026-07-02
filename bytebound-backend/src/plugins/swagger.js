@@ -1,7 +1,8 @@
 import swagger from '@fastify/swagger';
 import swaggerUI from '@fastify/swagger-ui';
+import fp from 'fastify-plugin';
 
-export default async function swaggerPlugin(app) {
+async function swaggerPlugin(app) {
     await app.register(swagger, {
         openapi: {
             info: {
@@ -33,3 +34,5 @@ export default async function swaggerPlugin(app) {
         transformStaticCSP: (header) => header,
     });
 }
+
+export default fp(swaggerPlugin);
