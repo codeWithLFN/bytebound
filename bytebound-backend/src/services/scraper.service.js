@@ -37,6 +37,31 @@ function looksLikeExternalFile(url = '') {
     );
 }
 
+function isKnownNonDownloadUrl(url = '') {
+    try {
+        const pathname = new URL(url).pathname.toLowerCase();
+
+        return (
+            pathname.endsWith('/biblioservice.php') ||
+            pathname.endsWith('/json.php') ||
+            pathname.endsWith('/ads.php') ||
+            pathname.endsWith('/book.php') ||
+            pathname.startsWith('/book/') ||
+            pathname.startsWith('/index.php')
+        );
+    } catch {
+        return false;
+    }
+}
+
+function isDownloadCandidateUrl(url = '') {
+    if (!url || isAnnaArchiveUrl(url) || isKnownNonDownloadUrl(url)) {
+        return false;
+    }
+
+    return looksLikeExternalFile(url);
+}
+
 export class UpstreamError extends Error {
     constructor(status, message) {
         super(message || `Upstream request failed with status ${status}`);
@@ -45,13 +70,16 @@ export class UpstreamError extends Error {
     }
 }
 
+// --- Network Helpers ---
+
 async function fetchHtml(path, options = {}) {
     const url = path.startsWith('http') ? path : new URL(path, BASE_URL).toString();
 
     const response = await fetch(url, {
         headers: {
             'User-Agent': USER_AGENT,
-            Accept: 'text/html,application/xhtml+xml',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
         },
         redirect: options.redirect || 'follow',
     });
@@ -63,17 +91,24 @@ async function fetchHtml(path, options = {}) {
     return response.text();
 }
 
-async function fetchResponse(path, options = {}) {
+async function fetchJson(path) {
     const url = path.startsWith('http') ? path : new URL(path, BASE_URL).toString();
 
-    return fetch(url, {
+    const response = await fetch(url, {
         headers: {
             'User-Agent': USER_AGENT,
-            Accept: 'text/html,application/xhtml+xml',
+            'Accept': 'application/json',
         },
-        redirect: options.redirect || 'follow',
     });
+
+    if (!response.ok) {
+        return null;
+    }
+
+    return response.json();
 }
+
+// --- Parsing & Extraction ---
 
 function extractTextWithSeparators($) {
     return $('html *')
@@ -107,7 +142,7 @@ async function resolveSlowPageToFile(slowUrl, fallbackLabel = 'Slow Partner Serv
 
             const isDownloadNow = label.toLowerCase().includes('download now');
 
-            if (isDownloadNow || looksLikeExternalFile(absoluteUrl)) {
+            if (isDownloadNow || isDownloadCandidateUrl(absoluteUrl)) {
                 directLink = {
                     label: label || 'Download now',
                     url: absoluteUrl,
@@ -121,6 +156,7 @@ async function resolveSlowPageToFile(slowUrl, fallbackLabel = 'Slow Partner Serv
             return directLink;
         }
 
+        // Fallback parsing logic...
         const pageHtml = $.html();
         const pageText = $.root().text();
         const separatedText = extractTextWithSeparators($);
@@ -128,7 +164,7 @@ async function resolveSlowPageToFile(slowUrl, fallbackLabel = 'Slow Partner Serv
         const markdownMatch = pageHtml.match(/\[[^\]]*?\]\((https?:\/\/[^)\s]+)\)/i);
         if (markdownMatch?.[1]) {
             const url = markdownMatch[1].replace(/[)\]}>,.;]+$/, '');
-            if (!isAnnaArchiveUrl(url) && looksLikeExternalFile(url)) {
+            if (isDownloadCandidateUrl(url)) {
                 return {
                     label: 'Download now',
                     url,
@@ -141,7 +177,7 @@ async function resolveSlowPageToFile(slowUrl, fallbackLabel = 'Slow Partner Serv
         const htmlUrls = pageHtml.match(/https?:\/\/[^\s"'<>]+/gi) || [];
         for (const candidate of htmlUrls) {
             const url = candidate.replace(/[)\]}>,.;]+$/, '');
-            if (!isAnnaArchiveUrl(url) && looksLikeExternalFile(url)) {
+            if (isDownloadCandidateUrl(url)) {
                 return {
                     label: 'Download now',
                     url,
@@ -156,7 +192,7 @@ async function resolveSlowPageToFile(slowUrl, fallbackLabel = 'Slow Partner Serv
 
         for (const candidate of textUrls) {
             const url = candidate.replace(/[)\]}>,.;]+$/, '');
-            if (!isAnnaArchiveUrl(url) && looksLikeExternalFile(url)) {
+            if (isDownloadCandidateUrl(url)) {
                 return {
                     label: 'Download now',
                     url,
@@ -170,8 +206,12 @@ async function resolveSlowPageToFile(slowUrl, fallbackLabel = 'Slow Partner Serv
     }
 
     try {
-        const res = await fetchResponse(slowUrl, { redirect: 'manual' });
-        const location = res.headers.get('location');
+        const url = slowUrl;
+        const response = await fetch(url, {
+            headers: { 'User-Agent': USER_AGENT },
+            redirect: 'manual',
+        });
+        const location = response.headers.get('location');
 
         if (location) {
             const absoluteLocation = toAbsoluteUrl(location);
@@ -233,6 +273,8 @@ function extractSlowCandidates($detail) {
     return candidates;
 }
 
+// --- Main Exports ---
+
 export async function searchBooksFromSource({ q, format, language }) {
     const params = new URLSearchParams({ q });
 
@@ -289,30 +331,71 @@ export async function searchBooksFromSource({ q, format, language }) {
 }
 
 export async function getDownloadLinksFromSource(md5) {
-    const detailHtml = await fetchHtml(`/md5/${md5}`);
-    const $detail = cheerio.load(detailHtml);
+    // 1. The "Bypass": Try the JSON API endpoint first.
+    // This endpoint usually returns data without triggering DDoS Guard challenges.
+    try {
+        const info = await fetchJson(`/dyn/md5/inline_info/${md5}`);
 
-    const slowCandidates = extractSlowCandidates($detail);
-
-    if (!slowCandidates.length) {
-        return [];
-    }
-
-    for (const candidate of slowCandidates) {
-        const resolved = await resolveSlowPageToFile(candidate.url, candidate.label);
-        if (resolved) {
-            return [resolved];
+        if (info && info.success && info.downloadUrls) {
+            const links = [];
+            for (const link of info.downloadUrls) {
+                if (link.url && isDownloadCandidateUrl(link.url)) {
+                    links.push({
+                        label: link.source || 'Download',
+                        url: link.url,
+                        speed: link.speed || 'unknown',
+                        source: link.source || 'unknown',
+                    });
+                }
+            }
+            if (links.length > 0) return links;
         }
+    } catch {
+        // Ignore API errors, fall through to HTML parsing
     }
 
-    const bestFallback = slowCandidates[0];
+    // 2. Fallback: HTML Parsing (The slow/DDG vulnerable way)
+    try {
+        const detailHtml = await fetchHtml(`/md5/${md5}`);
+        const $detail = cheerio.load(detailHtml);
 
-    return [
-        {
-            label: bestFallback.label,
-            url: bestFallback.url,
-            speed: 'slow',
-            source: bestFallback.url,
-        },
-    ];
+        const slowCandidates = extractSlowCandidates($detail);
+
+        if (slowCandidates.length > 0) {
+            for (const candidate of slowCandidates) {
+                const resolved = await resolveSlowPageToFile(candidate.url, candidate.label);
+                if (resolved) {
+                    return [resolved];
+                }
+            }
+        }
+
+        // Look for direct links in HTML if slow_download wasn't found
+        const directLinks = [];
+        $detail('a[href]').each((_, el) => {
+            const href = $detail(el).attr('href') || '';
+            const label = normalizeText($detail(el).text());
+            const absoluteUrl = toAbsoluteUrl(href);
+
+            if (!href || isAnnaArchiveUrl(absoluteUrl)) return;
+
+            const isDownloadNow = label.toLowerCase().includes('download now');
+            if (isDownloadNow || isDownloadCandidateUrl(absoluteUrl)) {
+                directLinks.push({
+                    label: label || 'Download',
+                    url: absoluteUrl,
+                    speed: 'unknown',
+                    source: absoluteUrl,
+                });
+            }
+        });
+
+        if (directLinks.length > 0) {
+            return directLinks;
+        }
+    } catch {
+        // Ignore HTML errors
+    }
+
+    return [];
 }
