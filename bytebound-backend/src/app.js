@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import dotenv from 'dotenv';
+import serverless from 'serverless-http';
 
 import corsPlugin from './plugins/cors.js';
 import swaggerPlugin from './plugins/swagger.js';
@@ -35,3 +36,8 @@ export function buildApp(opts = {}) {
 
     return app;
 }
+
+// Vercel serverless handler — wraps the Fastify app for serverless environments
+const app = buildApp({ logger: false });
+await app.ready();
+export default serverless(app);
