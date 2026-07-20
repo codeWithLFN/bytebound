@@ -13,18 +13,20 @@ dotenv.config();
 
 export function buildApp(opts = {}) {
     const app = Fastify({
-        logger: true,
-        ...opts,
+        logger: opts.logger ?? true,
     });
 
+    // Plugins
     app.register(sensiblePlugin);
     app.register(corsPlugin);
     app.register(swaggerPlugin);
 
+    // Routes
     app.register(healthRoutes);
     app.register(booksRoutes, { prefix: '/books' });
     app.register(linksRoutes, { prefix: '/links' });
 
+    // Root endpoint
     app.get('/', async () => ({
         name: 'bytebound-backend',
         status: 'ok',
