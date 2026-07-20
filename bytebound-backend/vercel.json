@@ -3,14 +3,14 @@
   "version": 2,
   "builds": [
     {
-      "src": "bytebound-backend/src/app.js",
+      "src": "src/app.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "bytebound-backend/src/app.js"
+      "dest": "src/app.js"
     }
   ]
 }
