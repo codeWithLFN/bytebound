@@ -1,0 +1,11 @@
+{
+  "remoteName": "origin",
+  "projects": [
+    {
+      "id": "prj_RUYNY1ONonWqY7q2Wy5d11TLGJF9",
+      "name": "bytebound",
+      "directory": "bytebound-backend",
+      "orgId": "team_LFPL1mnQMMjdvHbsVDf4twen"
+    }
+  ]
+}

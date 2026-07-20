@@ -1,3 +1,10 @@
-import handler from '../src/app.js';
+import serverless from 'serverless-http';
+import { buildApp } from '../src/app.js';
 
-export default handler;
+const app = buildApp({
+    logger: false,
+});
+
+await app.ready();
+
+export default serverless(app);
