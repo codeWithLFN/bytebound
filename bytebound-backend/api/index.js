@@ -1,4 +1,4 @@
-import serverless from 'serverless-http';
+import awsLambdaFastify from '@fastify/aws-lambda';
 import { buildApp } from '../src/app.js';
 
 const app = buildApp({
@@ -7,4 +7,4 @@ const app = buildApp({
 
 await app.ready();
 
-export default serverless(app);
+export const handler = awsLambdaFastify(app);
