@@ -46,6 +46,7 @@ function isKnownNonDownloadUrl(url = '') {
             pathname.endsWith('/json.php') ||
             pathname.endsWith('/ads.php') ||
             pathname.endsWith('/book.php') ||
+            pathname.endsWith('/file.php') ||
             pathname.startsWith('/book/') ||
             pathname.startsWith('/index.php')
         );
