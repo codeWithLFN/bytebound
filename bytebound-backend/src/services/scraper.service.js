@@ -124,154 +124,59 @@ function extractTextWithSeparators($) {
         .trim();
 }
 
-async function resolveSlowPageToFile(slowUrl, fallbackLabel = 'Slow Partner Server') {
-    try {
-        const html = await fetchHtml(slowUrl);
-        const $ = cheerio.load(html);
-
-        let directLink = null;
-
-        $('a[href]').each((_, el) => {
-            if (directLink) return;
-
-            const href = $(el).attr('href') || '';
-            const label = normalizeText($(el).text());
-            const absoluteUrl = toAbsoluteUrl(href);
-
-            if (!href || !absoluteUrl) return;
-            if (isAnnaArchiveUrl(absoluteUrl)) return;
-
-            const isDownloadNow = label.toLowerCase().includes('download now');
-
-            if (isDownloadNow || isDownloadCandidateUrl(absoluteUrl)) {
-                directLink = {
-                    label: label || 'Download now',
-                    url: absoluteUrl,
-                    speed: 'slow',
-                    source: slowUrl,
-                };
-            }
-        });
-
-        if (directLink) {
-            return directLink;
-        }
-
-        // Fallback parsing logic...
-        const pageHtml = $.html();
-        const pageText = $.root().text();
-        const separatedText = extractTextWithSeparators($);
-
-        const markdownMatch = pageHtml.match(/\[[^\]]*?\]\((https?:\/\/[^)\s]+)\)/i);
-        if (markdownMatch?.[1]) {
-            const url = markdownMatch[1].replace(/[)\]}>,.;]+$/, '');
-            if (isDownloadCandidateUrl(url)) {
-                return {
-                    label: 'Download now',
-                    url,
-                    speed: 'slow',
-                    source: slowUrl,
-                };
-            }
-        }
-
-        const htmlUrls = pageHtml.match(/https?:\/\/[^\s"'<>]+/gi) || [];
-        for (const candidate of htmlUrls) {
-            const url = candidate.replace(/[)\]}>,.;]+$/, '');
-            if (isDownloadCandidateUrl(url)) {
-                return {
-                    label: 'Download now',
-                    url,
-                    speed: 'slow',
-                    source: slowUrl,
-                };
-            }
-        }
-
-        const textUrls = (pageText.match(/https?:\/\/\S+/gi) || [])
-            .concat(separatedText.match(/https?:\/\/\S+/gi) || []);
-
-        for (const candidate of textUrls) {
-            const url = candidate.replace(/[)\]}>,.;]+$/, '');
-            if (isDownloadCandidateUrl(url)) {
-                return {
-                    label: 'Download now',
-                    url,
-                    speed: 'slow',
-                    source: slowUrl,
-                };
-            }
-        }
-    } catch {
-        // continue to manual redirect fallback
-    }
-
-    try {
-        const url = slowUrl;
-        const response = await fetch(url, {
-            headers: { 'User-Agent': USER_AGENT },
-            redirect: 'manual',
-        });
-        const location = response.headers.get('location');
-
-        if (location) {
-            const absoluteLocation = toAbsoluteUrl(location);
-            if (!isAnnaArchiveUrl(absoluteLocation)) {
-                return {
-                    label: 'Download now',
-                    url: absoluteLocation,
-                    speed: 'slow',
-                    source: slowUrl,
-                };
-            }
-        }
-    } catch {
-        // ignore
-    }
-
-    return null;
-}
-
-function extractSlowCandidates($detail) {
-    const candidates = [];
+function extractDownloadLinks($detail) {
+    const links = [];
     const seen = new Set();
 
     $detail('a[href]').each((_, el) => {
         const href = $detail(el).attr('href') || '';
-        const label = normalizeText($detail(el).text());
+        const lower = href.toLowerCase();
 
-        if (!href || !label) return;
-        if (!href.toLowerCase().includes('/slow_download/')) return;
+        const isSlow = lower.includes('/slow_download/');
+        const isFast = lower.includes('/fast_download/');
+        if (!isSlow && !isFast) return;
+
+        // Skip modifier links like ?viewer=1 / ?no_redirect=1 / ?short=1
+        if (/[?&](viewer|no_redirect|short)=/.test(lower)) return;
 
         const absoluteUrl = toAbsoluteUrl(href);
         if (!absoluteUrl || seen.has(absoluteUrl)) return;
         seen.add(absoluteUrl);
 
+        const label = normalizeText($detail(el).text());
+        const speed = isSlow ? 'slow' : 'fast';
+
         const parentText = normalizeText($detail(el).parent().text());
         const rowText = normalizeText($detail(el).closest('li, p, div').text());
-        const combinedText = `${label} ${parentText} ${rowText}`.toLowerCase();
+        const combined = `${label} ${parentText} ${rowText}`.toLowerCase();
 
-        const noWaitlist = combinedText.includes('no waitlist');
-        const withWaitlist = combinedText.includes('with waitlist');
-
-        candidates.push({
-            label,
+        links.push({
+            label: label || (isSlow ? 'Slow Partner Server' : 'Fast Partner Server'),
             url: absoluteUrl,
-            speed: 'slow',
-            noWaitlist,
-            withWaitlist,
+            speed,
+            source: absoluteUrl,
+            noWaitlist: combined.includes('no waitlist'),
+            withWaitlist: combined.includes('with waitlist'),
+            recommended: combined.includes('recommended'),
         });
     });
 
-    candidates.sort((a, b) => {
-        if (a.noWaitlist && !b.noWaitlist) return -1;
-        if (!a.noWaitlist && b.noWaitlist) return 1;
-        if (a.withWaitlist && !b.withWaitlist) return 1;
-        if (!a.withWaitlist && b.withWaitlist) return -1;
+    // Fast first, then by recommendation / waitlist signals
+    links.sort((a, b) => {
+        if (a.speed !== b.speed) return a.speed === 'fast' ? -1 : 1;
+        if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
+        if (a.noWaitlist !== b.noWaitlist) return a.noWaitlist ? -1 : 1;
+        if (a.withWaitlist !== b.withWaitlist) return a.withWaitlist ? 1 : -1;
         return 0;
     });
 
-    return candidates;
+    // Strip internal sort keys
+    return links.map(({ label, url, speed, source }) => ({
+        label,
+        url,
+        speed,
+        source,
+    }));
 }
 
 // --- Main Exports ---
@@ -333,12 +238,24 @@ export async function searchBooksFromSource({ q, format, language, page }) {
 }
 
 export async function getDownloadLinksFromSource(md5) {
-    // 1. The "Bypass": Try the JSON API endpoint first.
-    // This endpoint usually returns data without triggering DDoS Guard challenges.
+    // 1. Primary: parse the detail page for fast/slow partner download links.
+    try {
+        const detailHtml = await fetchHtml(`/md5/${md5}`);
+        const $detail = cheerio.load(detailHtml);
+
+        const links = extractDownloadLinks($detail);
+        if (links.length > 0) {
+            return links;
+        }
+    } catch {
+        // Ignore HTML errors, fall through to JSON bypass
+    }
+
+    // 2. Defensive fallback: JSON bypass endpoint (older upstream shape).
     try {
         const info = await fetchJson(`/dyn/md5/inline_info/${md5}`);
 
-        if (info && info.success && info.downloadUrls) {
+        if (info && info.success && Array.isArray(info.downloadUrls)) {
             const links = [];
             for (const link of info.downloadUrls) {
                 if (link.url && isDownloadCandidateUrl(link.url)) {
@@ -353,50 +270,7 @@ export async function getDownloadLinksFromSource(md5) {
             if (links.length > 0) return links;
         }
     } catch {
-        // Ignore API errors, fall through to HTML parsing
-    }
-
-    // 2. Fallback: HTML Parsing (The slow/DDG vulnerable way)
-    try {
-        const detailHtml = await fetchHtml(`/md5/${md5}`);
-        const $detail = cheerio.load(detailHtml);
-
-        const slowCandidates = extractSlowCandidates($detail);
-
-        if (slowCandidates.length > 0) {
-            for (const candidate of slowCandidates) {
-                const resolved = await resolveSlowPageToFile(candidate.url, candidate.label);
-                if (resolved) {
-                    return [resolved];
-                }
-            }
-        }
-
-        // Look for direct links in HTML if slow_download wasn't found
-        const directLinks = [];
-        $detail('a[href]').each((_, el) => {
-            const href = $detail(el).attr('href') || '';
-            const label = normalizeText($detail(el).text());
-            const absoluteUrl = toAbsoluteUrl(href);
-
-            if (!href || isAnnaArchiveUrl(absoluteUrl)) return;
-
-            const isDownloadNow = label.toLowerCase().includes('download now');
-            if (isDownloadNow || isDownloadCandidateUrl(absoluteUrl)) {
-                directLinks.push({
-                    label: label || 'Download',
-                    url: absoluteUrl,
-                    speed: 'unknown',
-                    source: absoluteUrl,
-                });
-            }
-        });
-
-        if (directLinks.length > 0) {
-            return directLinks;
-        }
-    } catch {
-        // Ignore HTML errors
+        // Ignore API errors
     }
 
     return [];
