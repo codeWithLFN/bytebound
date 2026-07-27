@@ -12,8 +12,8 @@ async function swaggerPlugin(app) {
             },
             servers: [
                 {
-                    url: 'http://localhost:3000',
-                    description: 'Local development server',
+                    url: '/',
+                    description: 'Current server',
                 },
             ],
             tags: [
@@ -35,4 +35,4 @@ async function swaggerPlugin(app) {
     });
 }
 
-export default fp(swaggerPlugin);
+export default fp(swaggerPlugin);
