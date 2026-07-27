@@ -23,6 +23,12 @@ export function buildApp(opts = {}) {
 
     // Routes
     app.register(healthRoutes);
+
+    // Versioned API (canonical)
+    app.register(booksRoutes, { prefix: '/v1/books' });
+    app.register(linksRoutes, { prefix: '/v1/links' });
+
+    // Legacy unversioned routes (kept for backwards compatibility)
     app.register(booksRoutes, { prefix: '/books' });
     app.register(linksRoutes, { prefix: '/links' });
 
@@ -31,6 +37,10 @@ export function buildApp(opts = {}) {
         name: 'bytebound-backend',
         status: 'ok',
         docs: '/docs',
+        v1: {
+            books: '/v1/books',
+            links: '/v1/links',
+        },
     }));
 
     return app;

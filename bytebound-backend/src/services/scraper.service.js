@@ -276,11 +276,12 @@ function extractSlowCandidates($detail) {
 
 // --- Main Exports ---
 
-export async function searchBooksFromSource({ q, format, language }) {
+export async function searchBooksFromSource({ q, format, language, page }) {
     const params = new URLSearchParams({ q });
 
     if (format) params.set('ext', format);
     if (language) params.set('lang', language);
+    if (page && Number(page) > 1) params.set('page', String(Number(page)));
 
     const html = await fetchHtml(`/search?${params.toString()}`);
     const $ = cheerio.load(html);
@@ -399,4 +400,89 @@ export async function getDownloadLinksFromSource(md5) {
     }
 
     return [];
+}
+
+export async function getBookDetailsFromSource(md5) {
+    const html = await fetchHtml(`/md5/${md5}`);
+    const $ = cheerio.load(html);
+
+    const title = normalizeText(
+        $('div.text-3xl').first().text() ||
+        $('h3').first().text() ||
+        $('h1').first().text()
+    );
+
+    if (!title) {
+        throw new UpstreamError(404, `No book found for MD5: ${md5}`);
+    }
+
+    const author = normalizeText($('div.italic').first().text());
+
+    const coverSrc =
+        $('img[src*="/covers/"]').first().attr('src') ||
+        $('img[alt*="cover" i]').first().attr('src') ||
+        '';
+    const cover = coverSrc ? toAbsoluteUrl(coverSrc) : '';
+
+    const description = normalizeText(
+        $('div.js-md5-top-box-description').first().text() ||
+        $('div[class*="description"]').first().text()
+    );
+
+    const grayText = normalizeText(
+        $('div.text-gray-800, div.text-gray-700, div.text-gray-600, div.text-gray-500')
+            .map((_, el) => $(el).text())
+            .get()
+            .join(' ')
+    );
+    const pageText = extractTextWithSeparators($);
+
+    let publisher = normalizeText($('a[href*="/publisher/"]').first().text());
+
+    const yearMatch =
+        grayText.match(/year[:\s]*((?:19|20)\d{2})/i) ||
+        grayText.match(/\b((?:19|20)\d{2})\b/);
+    const year = yearMatch ? yearMatch[1] : '';
+
+    let format = '';
+    let filesize = '';
+    const fileMatch = pageText.match(
+        /File:\s*([A-Za-z0-9]+)\s*,\s*([\d.]+\s*(?:KB|MB|GB))/i
+    );
+    if (fileMatch) {
+        format = fileMatch[1].toLowerCase();
+        filesize = fileMatch[2].replace(/\s+/g, '');
+    } else {
+        const sizeMatch = pageText.match(/\b([\d.]+\s*(?:KB|MB|GB))\b/i);
+        if (sizeMatch) filesize = sizeMatch[1].replace(/\s+/g, '');
+        const fmtMatch = pageText.match(/\b(epub|pdf|mobi|azw3|djvu|fb2|cbz|cbr)\b/i);
+        if (fmtMatch) format = fmtMatch[1].toLowerCase();
+    }
+
+    const isbnMatch = pageText.match(
+        /ISBN(?:-1[03])?\s*[:\s]\s*([0-9][0-9Xx-]{8,16}[0-9Xx])/i
+    );
+    const isbn = isbnMatch ? isbnMatch[1] : '';
+
+    const langMatch =
+        pageText.match(/Language:\s*([A-Za-z]+)/i) ||
+        grayText.match(
+            /\b(English|French|German|Spanish|Portuguese|Arabic|Russian|Italian|Chinese|Japanese)\s*\[/i
+        );
+    const language = langMatch ? langMatch[1] : '';
+
+    return {
+        md5,
+        title,
+        author,
+        publisher,
+        year,
+        language,
+        format,
+        filesize,
+        isbn,
+        description,
+        cover,
+        detailUrl: toAbsoluteUrl(`/md5/${md5}`),
+    };
 }
