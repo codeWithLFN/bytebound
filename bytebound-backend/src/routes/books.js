@@ -4,6 +4,7 @@ import { UpstreamError } from '../services/scraper.service.js';
 export default async function booksRoutes(app) {
     app.get('/search', {
         schema: {
+            hide: app.prefix?.startsWith('/v1') !== true,
             tags: ['Books'],
             summary: 'Search books',
             description: 'Search for books by query text',
@@ -57,6 +58,7 @@ export default async function booksRoutes(app) {
 
     app.get('/:md5', {
         schema: {
+            hide: app.prefix?.startsWith('/v1') !== true,
             tags: ['Books'],
             summary: 'Get book details',
             description:

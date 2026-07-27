@@ -4,6 +4,7 @@ import { UpstreamError } from '../services/scraper.service.js';
 export default async function linksRoutes(app) {
     app.get('/:md5', {
         schema: {
+            hide: app.prefix?.startsWith('/v1') !== true,
             tags: ['Links'],
             summary: 'Get download links',
             description: 'Get the first slow download link for a book by MD5',
