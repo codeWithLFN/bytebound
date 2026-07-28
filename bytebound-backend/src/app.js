@@ -2,6 +2,8 @@ import Fastify from 'fastify';
 import dotenv from 'dotenv';
 
 import corsPlugin from './plugins/cors.js';
+import rateLimitPlugin from './plugins/rate-limit.js';
+import sentryPlugin from './plugins/sentry.js';
 import swaggerPlugin from './plugins/swagger.js';
 import sensiblePlugin from './plugins/sensible.js';
 
@@ -14,10 +16,13 @@ dotenv.config();
 export function buildApp(opts = {}) {
     const app = Fastify({
         logger: opts.logger ?? true,
+        trustProxy: true, // Vercel is behind a proxy; needed for correct client IPs
     });
 
     // Plugins
     app.register(sensiblePlugin);
+    app.register(sentryPlugin);
+    app.register(rateLimitPlugin);
     app.register(corsPlugin);
     app.register(swaggerPlugin);
 
