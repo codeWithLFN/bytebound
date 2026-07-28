@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "@fastify/rate-limit": "^11.1.0",
-    "@sentry/node": "^10.68.0"
-  }
-}
