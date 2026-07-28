@@ -1,4 +1,4 @@
-import { getBookDetails, searchBooks } from '../services/books.service.js';
+import { getBookCover, getBookDetails, searchBooks } from '../services/books.service.js';
 import { UpstreamError } from '../services/scraper.service.js';
 
 export default async function booksRoutes(app) {
@@ -53,6 +53,45 @@ export default async function booksRoutes(app) {
                 count: results.length,
                 results,
             };
+        },
+    });
+
+    app.get('/:md5/cover', {
+        schema: {
+            hide: app.prefix?.startsWith('/v1') !== true,
+            tags: ['Books'],
+            summary: 'Get book cover',
+            description:
+                'Proxy the book cover image through the backend. Returns the image bytes with a long cache header.',
+            params: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    md5: { type: 'string', minLength: 1 },
+                },
+                required: ['md5'],
+            },
+        },
+        handler: async (request, reply) => {
+            const { md5 } = request.params;
+
+            try {
+                const { buffer, contentType } = await getBookCover(md5);
+
+                return reply
+                    .header('Content-Type', contentType)
+                    .header('Cache-Control', 'public, max-age=86400, immutable')
+                    .send(buffer);
+            } catch (err) {
+                if (err instanceof UpstreamError && err.statusCode === 404) {
+                    return reply.status(404).send({
+                        error: 'Not Found',
+                        message: `No cover found for MD5: ${md5}`,
+                    });
+                }
+
+                throw err;
+            }
         },
     });
 

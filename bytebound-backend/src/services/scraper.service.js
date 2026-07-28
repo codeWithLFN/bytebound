@@ -4,6 +4,7 @@ const BASE_URL = process.env.SOURCE_BASE_URL || 'https://annas-archive.gl';
 const USER_AGENT =
     process.env.USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
+const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS) || 8000;
 
 function normalizeText(value = '') {
     return value.replace(/\s+/g, ' ').trim();
@@ -77,6 +78,7 @@ async function fetchHtml(path, options = {}) {
     const url = path.startsWith('http') ? path : new URL(path, BASE_URL).toString();
 
     const response = await fetch(url, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         headers: {
             'User-Agent': USER_AGENT,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -96,6 +98,7 @@ async function fetchJson(path) {
     const url = path.startsWith('http') ? path : new URL(path, BASE_URL).toString();
 
     const response = await fetch(url, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         headers: {
             'User-Agent': USER_AGENT,
             'Accept': 'application/json',
@@ -109,7 +112,52 @@ async function fetchJson(path) {
     return response.json();
 }
 
+export async function fetchCover(md5) {
+    // Resolve the cover URL from the detail page, then stream the bytes.
+    const html = await fetchHtml(`/md5/${md5}`);
+    const $ = cheerio.load(html);
+
+    const coverSrc = extractCoverSrc($);
+
+    if (!coverSrc) {
+        throw new UpstreamError(404, `No cover found for MD5: ${md5}`);
+    }
+
+    const coverUrl = toAbsoluteUrl(coverSrc);
+    const response = await fetch(coverUrl, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        headers: { 'User-Agent': USER_AGENT, 'Accept': 'image/*,*/*;q=0.8' },
+    });
+
+    if (!response.ok) {
+        throw new UpstreamError(response.status, 'Failed to fetch cover image');
+    }
+
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    return { buffer, contentType };
+}
+
 // --- Parsing & Extraction ---
+
+function extractCoverSrc($) {
+    return (
+        // Anna's Archive cover images live on external cover hosts or /covers paths
+        $('img[src*="covers"]').first().attr('src') ||
+        $('img[alt*="cover" i]').first().attr('src') ||
+        ''
+    );
+}
+
+function extractTitle($) {
+    return normalizeText(
+        // The main record title
+        $('div.font-semibold.text-2xl').first().text() ||
+        $('div.text-3xl').first().text() ||
+        $('h2').first().text()
+    );
+}
 
 function extractTextWithSeparators($) {
     return $('html *')
@@ -179,6 +227,37 @@ function extractDownloadLinks($detail) {
     }));
 }
 
+const IPFS_GATEWAYS = [
+    'https://ipfs.io',
+    'https://dweb.link',
+    'https://cloudflare-ipfs.com',
+];
+
+function extractIpfsLinks($detail) {
+    const links = [];
+    const seen = new Set();
+
+    $detail('a[href^="ipfs://"]').each((_, el) => {
+        const href = $detail(el).attr('href') || '';
+        const cid = href.replace(/^ipfs:\/\//i, '').split(/[?#/]/)[0];
+
+        if (!cid || seen.has(cid)) return;
+        seen.add(cid);
+
+        for (const gateway of IPFS_GATEWAYS) {
+            const url = `${gateway}/ipfs/${cid}`;
+            links.push({
+                label: `IPFS (${new URL(gateway).hostname})`,
+                url,
+                speed: 'ipfs',
+                source: url,
+            });
+        }
+    });
+
+    return links;
+}
+
 // --- Main Exports ---
 
 export async function searchBooksFromSource({ q, format, language, page }) {
@@ -244,8 +323,11 @@ export async function getDownloadLinksFromSource(md5) {
         const $detail = cheerio.load(detailHtml);
 
         const links = extractDownloadLinks($detail);
-        if (links.length > 0) {
-            return links;
+        const ipfsLinks = extractIpfsLinks($detail);
+        const combined = [...links, ...ipfsLinks];
+
+        if (combined.length > 0) {
+            return combined;
         }
     } catch {
         // Ignore HTML errors, fall through to JSON bypass
@@ -280,11 +362,7 @@ export async function getBookDetailsFromSource(md5) {
     const html = await fetchHtml(`/md5/${md5}`);
     const $ = cheerio.load(html);
 
-    const title = normalizeText(
-        $('div.text-3xl').first().text() ||
-        $('h3').first().text() ||
-        $('h1').first().text()
-    );
+    const title = extractTitle($);
 
     if (!title) {
         throw new UpstreamError(404, `No book found for MD5: ${md5}`);
@@ -292,10 +370,7 @@ export async function getBookDetailsFromSource(md5) {
 
     const author = normalizeText($('div.italic').first().text());
 
-    const coverSrc =
-        $('img[src*="/covers/"]').first().attr('src') ||
-        $('img[alt*="cover" i]').first().attr('src') ||
-        '';
+    const coverSrc = extractCoverSrc($);
     const cover = coverSrc ? toAbsoluteUrl(coverSrc) : '';
 
     const description = normalizeText(

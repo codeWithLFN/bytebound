@@ -7,7 +7,8 @@ export default async function linksRoutes(app) {
             hide: app.prefix?.startsWith('/v1') !== true,
             tags: ['Links'],
             summary: 'Get download links',
-            description: 'Get the first slow download link for a book by MD5',
+            description:
+                'Get download links for a book by MD5. Use ?type=ipfs|fast|slow to filter by link type.',
             params: {
                 type: 'object',
                 additionalProperties: false,
@@ -15,6 +16,13 @@ export default async function linksRoutes(app) {
                     md5: { type: 'string', minLength: 1 },
                 },
                 required: ['md5'],
+            },
+            querystring: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    type: { type: 'string', enum: ['ipfs', 'fast', 'slow'] },
+                },
             },
             response: {
                 200: {
@@ -53,9 +61,10 @@ export default async function linksRoutes(app) {
         },
         handler: async (request, reply) => {
             const { md5 } = request.params;
+            const { type } = request.query;
 
             try {
-                return await getLinksByMd5(md5);
+                return await getLinksByMd5(md5, { type });
             } catch (err) {
                 if (err instanceof UpstreamError && err.statusCode === 404) {
                     return reply.status(404).send({
