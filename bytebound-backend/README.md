@@ -7,20 +7,27 @@ Fastify backend API for ByteBound — search books, fetch metadata, and get down
 Base URL: `https://<your-app>.vercel.app`
 
 ### Health
+
 | Method | Path | Description |
-|--------|------|-------------|
+| ------ | ---- | ----------- |
 | GET | `/health` | Service health check |
 
 ### Books
+
 | Method | Path | Description |
-|--------|------|-------------|
+| ------ | ---- | ----------- |
 | GET | `/v1/books/search?q=...&page=1&format=epub&language=english` | Search books. Returns up to 25 results with `md5`, `title`, `author`, `format`, `language`. |
+| GET | `/v1/books/topics` | List interest topics (chips) for onboarding. |
+| GET | `/v1/books/discover?topics=programming,history&language=en` | Books for the selected interest topics. |
+| GET | `/v1/books/trending?language=en` | Popular books for the "Trending this week" carousel. |
+| GET | `/v1/books/recommendations?topics=programming&format=epub` | Personalised-looking books by topic; falls back to trending when no topics are given. |
 | GET | `/v1/books/:md5` | Full book metadata: title, author, publisher, year, ISBN, description, cover URL, etc. |
 | GET | `/v1/books/:md5/cover` | Proxied cover image (JPEG bytes, `Cache-Control: max-age=86400`). Use this in the app instead of hotlinking. |
 
 ### Links
+
 | Method | Path | Description |
-|--------|------|-------------|
+| ------ | ---- | ----------- |
 | GET | `/v1/links/:md5` | Download links. Returns partner links (`fast`/`slow`) + direct IPFS gateway links (`ipfs`). |
 | GET | `/v1/links/:md5?type=ipfs` | Filter by link type: `ipfs`, `fast`, or `slow`. |
 
@@ -50,7 +57,7 @@ npm test           # node --test
 Set these in Vercel → Project Settings → Environment Variables (or a local `.env`):
 
 | Variable | Default | Description |
-|----------|---------|-------------|
+| -------- | ------- | ----------- |
 | `SOURCE_BASE_URL` | `https://annas-archive.gl` | Upstream source site |
 | `USER_AGENT` | Chrome UA string | User-Agent for upstream requests |
 | `FETCH_TIMEOUT_MS` | `8000` | Upstream fetch timeout (keep under Vercel's 10s limit) |

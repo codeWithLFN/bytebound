@@ -1,7 +1,134 @@
-import { getBookCover, getBookDetails, searchBooks } from '../services/books.service.js';
+import {
+    discoverBooks,
+    getBookCover,
+    getBookDetails,
+    getRecommendations,
+    getTopics,
+    getTrending,
+    searchBooks,
+} from '../services/books.service.js';
 import { UpstreamError } from '../services/scraper.service.js';
 
 export default async function booksRoutes(app) {
+    const isV1 = () => app.prefix?.startsWith('/v1') === true;
+
+    const bookListItem = {
+        type: 'object',
+        properties: {
+            md5: { type: 'string' },
+            title: { type: 'string' },
+            author: { type: 'string' },
+            format: { type: 'string' },
+            language: { type: 'string' },
+            detailUrl: { type: 'string' },
+        },
+    };
+
+    const bookListSchema = {
+        type: 'object',
+        properties: {
+            count: { type: 'number' },
+            results: { type: 'array', items: bookListItem },
+        },
+    };
+
+    const discoverQuerystring = {
+        type: 'object',
+        properties: {
+            topics: { type: 'string', description: 'Comma-separated topic ids' },
+            format: { type: 'string' },
+            language: { type: 'string' },
+        },
+    };
+
+    app.get('/topics', {
+        schema: {
+            hide: !isV1(),
+            tags: ['Books'],
+            summary: 'List interest topics',
+            description: 'Interest chips shown during onboarding.',
+            response: {
+                200: {
+                    type: 'object',
+                    properties: {
+                        count: { type: 'number' },
+                        topics: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    id: { type: 'string' },
+                                    label: { type: 'string' },
+                                    emoji: { type: 'string' },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        handler: async () => {
+            const topics = getTopics();
+            return { count: topics.length, topics };
+        },
+    });
+
+    app.get('/discover', {
+        schema: {
+            hide: !isV1(),
+            tags: ['Books'],
+            summary: 'Discover books by topics',
+            querystring: { ...discoverQuerystring, required: ['topics'] },
+            response: { 200: bookListSchema },
+        },
+        handler: async (request) => {
+            const { topics = '', format, language } = request.query;
+            const results = await discoverBooks({
+                topics: topics.split(',').filter(Boolean),
+                format,
+                language,
+            });
+            return { count: results.length, results };
+        },
+    });
+
+    app.get('/trending', {
+        schema: {
+            hide: !isV1(),
+            tags: ['Books'],
+            summary: 'Trending books',
+            description: 'Popular books for the "Trending this week" carousel.',
+            querystring: discoverQuerystring,
+            response: { 200: bookListSchema },
+        },
+        handler: async (request) => {
+            const { format, language } = request.query;
+            const results = await getTrending({ format, language });
+            return { count: results.length, results };
+        },
+    });
+
+    app.get('/recommendations', {
+        schema: {
+            hide: !isV1(),
+            tags: ['Books'],
+            summary: 'Recommended books',
+            description:
+                "Personalised-looking books based on the user's interest topics. Falls back to trending when no topics are given.",
+            querystring: discoverQuerystring,
+            response: { 200: bookListSchema },
+        },
+        handler: async (request) => {
+            const { topics = '', format, language } = request.query;
+            const results = await getRecommendations({
+                topics: topics.split(',').filter(Boolean),
+                format,
+                language,
+            });
+            return { count: results.length, results };
+        },
+    });
+
     app.get('/search', {
         schema: {
             hide: app.prefix?.startsWith('/v1') !== true,
