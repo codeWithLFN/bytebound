@@ -4,7 +4,7 @@ Fastify backend API for ByteBound — search books, fetch metadata, and get down
 
 ## API Endpoints
 
-Base URL: `https://<your-app>.vercel.app`
+Base URL: `https://bytebound-five.vercel.app/docs`
 
 ### Health
 
