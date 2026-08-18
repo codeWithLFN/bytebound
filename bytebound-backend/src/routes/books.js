@@ -168,18 +168,42 @@ export default async function booksRoutes(app) {
                         },
                     },
                 },
+                503: {
+                    type: 'object',
+                    properties: {
+                        statusCode: { type: 'number' },
+                        error: { type: 'string' },
+                        message: { type: 'string' },
+                    },
+                },
             },
         },
-        handler: async (request) => {
+        handler: async (request, reply) => {
             const { q, format, language, page } = request.query;
-            const results = await searchBooks({ q, format, language, page });
 
-            return {
-                query: q,
-                page,
-                count: results.length,
-                results,
-            };
+            try {
+                const results = await searchBooks({ q, format, language, page });
+
+                return {
+                    query: q,
+                    page,
+                    count: results.length,
+                    results,
+                };
+            } catch (error) {
+                // Do not expose the source site's 403 as if the API rejected the
+                // caller. It means the configured upstream blocked our server.
+                if (error instanceof UpstreamError && error.statusCode === 403) {
+                    return reply.status(503).send({
+                        statusCode: 503,
+                        error: 'Service Unavailable',
+                        message:
+                            'Book search is temporarily unavailable. Configure SOURCE_BASE_URL to an accessible, permitted source.',
+                    });
+                }
+
+                throw error;
+            }
         },
     });
 

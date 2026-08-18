@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import dotenv from 'dotenv';
+import 'dotenv/config';
 
 import corsPlugin from './plugins/cors.js';
 import rateLimitPlugin from './plugins/rate-limit.js';
@@ -10,8 +10,6 @@ import sensiblePlugin from './plugins/sensible.js';
 import healthRoutes from './routes/health.js';
 import booksRoutes from './routes/books.js';
 import linksRoutes from './routes/links.js';
-
-dotenv.config();
 
 export function buildApp(opts = {}) {
     const app = Fastify({

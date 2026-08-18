@@ -45,6 +45,20 @@ function mockFetch(captured = {}) {
     };
 }
 
+function mockBlockedFetch() {
+    const originalFetch = global.fetch;
+
+    global.fetch = async () => ({
+        ok: false,
+        status: 403,
+        text: async () => '',
+    });
+
+    return () => {
+        global.fetch = originalFetch;
+    };
+}
+
 test('GET /v1/books/search returns results', async () => {
     const restore = mockFetch();
     const app = buildApp({ logger: false });
@@ -75,6 +89,20 @@ test('GET /v1/books/search forwards page param upstream', async () => {
         assert.equal(res.statusCode, 200);
         assert.equal(res.json().page, 3);
         assert.match(captured.lastUrl, /page=3/);
+    } finally {
+        await app.close();
+        restore();
+    }
+});
+
+test('GET /v1/books/search reports upstream blocking as 503', async () => {
+    const restore = mockBlockedFetch();
+    const app = buildApp({ logger: false });
+
+    try {
+        const res = await app.inject({ url: '/v1/books/search?q=dune' });
+        assert.equal(res.statusCode, 503);
+        assert.equal(res.json().error, 'Service Unavailable');
     } finally {
         await app.close();
         restore();
